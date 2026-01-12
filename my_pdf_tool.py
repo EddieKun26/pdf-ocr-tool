@@ -11,13 +11,12 @@ from pptx.util import Inches
 import os
 
 # --- 1. 核心設定 ---
-st.set_page_config(page_title="NotebookLM AI 旗艦版 (Cloud Ready)", layout="wide")
+st.set_page_config(page_title="NotebookLM AI 旗艦版 (Cloud Fix)", layout="wide")
 
 st.markdown("""
     <style>
     ::-webkit-scrollbar { width: 0px; background: transparent; }
     .block-container { padding-top: 3rem; padding-bottom: 5rem; }
-    
     div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] { gap: 0px; }
     .nav-btn button {
         border-top-left-radius: 0 !important;
@@ -39,8 +38,6 @@ st.markdown("""
         border-top-right-radius: 8px;
         overflow: hidden;
     }
-    
-    /* 深色編輯區 */
     div[data-testid="column"]:nth-of-type(3) {
         background-color: #1E1E1E;
         padding: 20px;
@@ -48,7 +45,6 @@ st.markdown("""
         border: 1px solid #444;
         box-shadow: 0 4px 12px rgba(0,0,0,0.5);
     }
-    
     .stTextArea textarea, .stTextInput input, .stNumberInput input {
         color: #ffffff !important;
         background-color: #2D2D2D !important;
@@ -78,29 +74,19 @@ if 'canvas_key' not in st.session_state: st.session_state.canvas_key = 0
 def get_ocr_engine():
     return RapidOCR(det_db_unclip_ratio=1.3) 
 
-# --- 修改後的字體設定 (Cloud Ready) ---
-# 1. 設定字體資料夾名稱
+# 字體設定 (Cloud Ready)
 FONT_DIR = "fonts"
-
-# 2. 設定具體檔案路徑 (這裡假設你丟進去的是微軟正黑體)
-# os.path.join 會自動處理 Windows (\) 和 Linux (/) 的路徑差異
 FONT_PATH_NORMAL = os.path.join(FONT_DIR, "msjh.ttc")
 FONT_PATH_BOLD = os.path.join(FONT_DIR, "msjhbd.ttc")
 
-# 3. 安全檢查：如果找不到檔案，嘗試自動切換
-if not os.path.exists(FONT_PATH_BOLD):
-    # 如果找不到粗體檔，就用普通體代替
-    FONT_PATH_BOLD = FONT_PATH_NORMAL
-
-if not os.path.exists(FONT_PATH_NORMAL):
-    # 如果連普通體都找不到 (例如檔名不對)，為了不讓程式當機，設為 None
-    # 這時程式會用醜醜的英文預設字體，但至少能跑
+if not os.path.exists(FONT_PATH_BOLD): FONT_PATH_BOLD = FONT_PATH_NORMAL
+if not os.path.exists(FONT_PATH_NORMAL): 
     FONT_PATH_NORMAL = None 
     FONT_PATH_BOLD = None
 
 DISPLAY_WIDTH = 800 
 
-# --- 歷史紀錄功能 ---
+# --- 歷史紀錄 ---
 def save_history(page_idx, current_img_bytes):
     if page_idx not in st.session_state.history: st.session_state.history[page_idx] = []
     if len(st.session_state.history[page_idx]) > 10: st.session_state.history[page_idx].pop(0)
@@ -126,7 +112,7 @@ def perform_redo(page_idx):
     return False
 
 # --- 4. 主程式 ---
-st.title("🤖 NotebookLM AI 旗艦版 (雲端部署準備版)")
+st.title("🤖 NotebookLM AI 旗艦版 (Cloud Fixed)")
 
 uploaded_file = st.file_uploader("請上傳 PDF", type="pdf")
 
@@ -140,7 +126,8 @@ if uploaded_file:
             st.subheader("📑 頁面")
             with st.container(height=700):
                 for i in range(total_pages):
-                    thumb = pdf.pages[i].to_image(resolution=40).original
+                    # [FIX 1] 強制轉 RGB
+                    thumb = pdf.pages[i].to_image(resolution=40).original.convert("RGB")
                     status_text = f"第 {i+1} 頁"
                     if i in st.session_state.pages_data:
                         status_text = f"✅ {i+1} (已修)"
@@ -168,10 +155,11 @@ if uploaded_file:
         with col_canvas:
             st.subheader(f"📍 工作區 (第 {curr+1} 頁)")
             
+            # [FIX 2] 強制轉 RGB
             if curr in st.session_state.pages_data:
-                bg_img = Image.open(io.BytesIO(st.session_state.pages_data[curr]))
+                bg_img = Image.open(io.BytesIO(st.session_state.pages_data[curr])).convert("RGB")
             else:
-                bg_img = page.to_image(resolution=150).original
+                bg_img = page.to_image(resolution=150).original.convert("RGB")
 
             # [狀態 A] 尚未分析
             if curr not in st.session_state.ocr_results:
@@ -196,15 +184,11 @@ if uploaded_file:
                                 width = max(xs) - min(xs)
                                 height = max(ys) - min(ys)
                                 
-                                # 智慧推算字體
+                                # 智慧推算
                                 calc_font_size = max(10, int(height * 0.9))
-                                
-                                if calc_font_size > 50:
-                                    calc_stroke = 2 
-                                elif calc_font_size > 80:
-                                    calc_stroke = 3 
-                                else:
-                                    calc_stroke = 0 
+                                if calc_font_size > 50: calc_stroke = 2 
+                                elif calc_font_size > 80: calc_stroke = 3 
+                                else: calc_stroke = 0 
                                 
                                 formatted.append({
                                     'x0': min(xs), 'top': min(ys), 
@@ -288,7 +272,6 @@ if uploaded_file:
         with col_edit:
             st.subheader("🛠️ 編輯面板")
             
-            # Undo / Redo
             c_undo, c_redo = st.columns(2)
             with c_undo:
                 has_history = (curr in st.session_state.history and len(st.session_state.history[curr]) > 0)
@@ -371,16 +354,17 @@ if uploaded_file:
                     if curr in st.session_state.pages_data:
                         current_img = st.session_state.pages_data[curr]
                     else:
+                        # [FIX 3] 強制轉 RGB
                         current_img = io.BytesIO()
-                        page.to_image(resolution=150).original.save(current_img, format="PNG")
+                        page.to_image(resolution=150).original.convert("RGB").save(current_img, format="PNG")
                         current_img = current_img.getvalue()
                     save_history(curr, current_img)
                     
                     # 繪圖
                     if curr in st.session_state.pages_data:
-                        base = Image.open(io.BytesIO(st.session_state.pages_data[curr]))
+                        base = Image.open(io.BytesIO(st.session_state.pages_data[curr])).convert("RGB")
                     else:
-                        base = page.to_image(resolution=150).original
+                        base = page.to_image(resolution=150).original.convert("RGB")
                     final_draw = ImageDraw.Draw(base)
                     
                     if 'orig_x0' in w:
@@ -389,9 +373,7 @@ if uploaded_file:
                         erase_coords = [w['x0'], w['top'], w['x1'], w['bottom']]
                     final_draw.rectangle(erase_coords, fill="white")
                     
-                    # 字體載入 (這裡也更新成從 fonts 資料夾讀取)
                     try:
-                        # 優先嘗試 FONT_PATH_NORMAL (已包含 fonts/ 路徑)
                         if FONT_PATH_NORMAL and os.path.exists(FONT_PATH_NORMAL):
                              font = ImageFont.truetype(FONT_PATH_NORMAL, f_size)
                         else:
@@ -433,14 +415,14 @@ if uploaded_file:
                         if i in st.session_state.pages_data:
                             img_list.append(st.session_state.pages_data[i])
                         else:
-                            p = pdf.pages[i].to_image(resolution=150).original
+                            p = pdf.pages[i].to_image(resolution=150).original.convert("RGB")
                             b = io.BytesIO()
                             p.save(b, format="PNG")
                             img_list.append(b.getvalue())
 
                     if export_format == "PDF":
                         pdf_bytes = img2pdf.convert(img_list)
-                        st.download_button("💾 下載 PDF", pdf_bytes, "final_cloud_ready.pdf")
+                        st.download_button("💾 下載 PDF", pdf_bytes, "final_cloud_fixed.pdf")
                     else:
                         prs = Presentation()
                         prs.slide_width = Inches(13.333)
@@ -450,6 +432,6 @@ if uploaded_file:
                             slide.shapes.add_picture(io.BytesIO(img_bytes), 0, 0, width=Inches(13.333))
                         ppt_out = io.BytesIO()
                         prs.save(ppt_out)
-                        st.download_button("💾 下載 PPTX", ppt_out.getvalue(), "final_cloud_ready.pptx")
+                        st.download_button("💾 下載 PPTX", ppt_out.getvalue(), "final_cloud_fixed.pptx")
 else:
     st.info("請上傳 PDF 開始...")
