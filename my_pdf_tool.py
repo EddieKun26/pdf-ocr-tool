@@ -11,7 +11,7 @@ from pptx.util import Inches
 import os
 
 # --- 1. 核心設定 ---
-st.set_page_config(page_title="NotebookLM AI 旗艦版 (Cloud Fix)", layout="wide")
+st.set_page_config(page_title="NotebookLM AI 旗艦版 (Canvas Fix)", layout="wide")
 
 st.markdown("""
     <style>
@@ -74,7 +74,7 @@ if 'canvas_key' not in st.session_state: st.session_state.canvas_key = 0
 def get_ocr_engine():
     return RapidOCR(det_db_unclip_ratio=1.3) 
 
-# 字體設定 (Cloud Ready)
+# 字體設定
 FONT_DIR = "fonts"
 FONT_PATH_NORMAL = os.path.join(FONT_DIR, "msjh.ttc")
 FONT_PATH_BOLD = os.path.join(FONT_DIR, "msjhbd.ttc")
@@ -85,6 +85,23 @@ if not os.path.exists(FONT_PATH_NORMAL):
     FONT_PATH_BOLD = None
 
 DISPLAY_WIDTH = 800 
+
+# --- 關鍵修正：圖片清洗函數 ---
+def sanitize_image(pil_image):
+    """
+    將圖片強制轉為 RGB 並重整記憶體，解決雲端畫布黑屏問題。
+    """
+    # 1. 強制轉 RGB
+    if pil_image.mode != "RGB":
+        pil_image = pil_image.convert("RGB")
+    
+    # 2. 存入記憶體再讀出 (像存檔一樣清洗資料)
+    b = io.BytesIO()
+    pil_image.save(b, format="PNG")
+    b.seek(0)
+    
+    # 3. 回傳全新的乾淨圖片物件
+    return Image.open(b)
 
 # --- 歷史紀錄 ---
 def save_history(page_idx, current_img_bytes):
@@ -112,7 +129,7 @@ def perform_redo(page_idx):
     return False
 
 # --- 4. 主程式 ---
-st.title("🤖 NotebookLM AI 旗艦版 (Cloud Fixed)")
+st.title("🤖 NotebookLM AI 旗艦版 (雲端畫布修復)")
 
 uploaded_file = st.file_uploader("請上傳 PDF", type="pdf")
 
@@ -126,8 +143,10 @@ if uploaded_file:
             st.subheader("📑 頁面")
             with st.container(height=700):
                 for i in range(total_pages):
-                    # [FIX 1] 強制轉 RGB
-                    thumb = pdf.pages[i].to_image(resolution=40).original.convert("RGB")
+                    # 使用 sanitize_image 清洗
+                    raw_thumb = pdf.pages[i].to_image(resolution=40).original
+                    thumb = sanitize_image(raw_thumb)
+                    
                     status_text = f"第 {i+1} 頁"
                     if i in st.session_state.pages_data:
                         status_text = f"✅ {i+1} (已修)"
@@ -155,11 +174,15 @@ if uploaded_file:
         with col_canvas:
             st.subheader(f"📍 工作區 (第 {curr+1} 頁)")
             
-            # [FIX 2] 強制轉 RGB
+            # 準備底圖 (關鍵修復點)
             if curr in st.session_state.pages_data:
-                bg_img = Image.open(io.BytesIO(st.session_state.pages_data[curr])).convert("RGB")
+                # 已經有修改過的圖，讀取並清洗
+                raw_img = Image.open(io.BytesIO(st.session_state.pages_data[curr]))
+                bg_img = sanitize_image(raw_img)
             else:
-                bg_img = page.to_image(resolution=150).original.convert("RGB")
+                # 原始 PDF 圖，讀取並清洗
+                raw_img = page.to_image(resolution=150).original
+                bg_img = sanitize_image(raw_img)
 
             # [狀態 A] 尚未分析
             if curr not in st.session_state.ocr_results:
@@ -230,10 +253,11 @@ if uploaded_file:
                     }
                     initial_drawing["objects"].append(rect_obj)
 
+                # 這裡使用經過清洗的 bg_img，應該不會再黑屏了
                 canvas_result = st_canvas(
                     fill_color="rgba(0, 113, 227, 0.1)",
                     stroke_color="rgba(0, 113, 227, 0.8)",
-                    background_image=bg_img,
+                    background_image=bg_img, 
                     initial_drawing=initial_drawing,
                     update_streamlit=True,
                     width=DISPLAY_WIDTH,
@@ -352,19 +376,25 @@ if uploaded_file:
                     
                     # 存 Undo
                     if curr in st.session_state.pages_data:
-                        current_img = st.session_state.pages_data[curr]
+                        # 已經是 bytes，直接讀取
+                        current_img_bytes = st.session_state.pages_data[curr]
                     else:
-                        # [FIX 3] 強制轉 RGB
-                        current_img = io.BytesIO()
-                        page.to_image(resolution=150).original.convert("RGB").save(current_img, format="PNG")
-                        current_img = current_img.getvalue()
-                    save_history(curr, current_img)
+                        # 第一次存，進行清洗並轉 bytes
+                        current_img = page.to_image(resolution=150).original
+                        current_img = sanitize_image(current_img)
+                        b = io.BytesIO()
+                        current_img.save(b, format="PNG")
+                        current_img_bytes = b.getvalue()
+                    save_history(curr, current_img_bytes)
                     
                     # 繪圖
                     if curr in st.session_state.pages_data:
-                        base = Image.open(io.BytesIO(st.session_state.pages_data[curr])).convert("RGB")
+                        base = Image.open(io.BytesIO(st.session_state.pages_data[curr]))
+                        base = sanitize_image(base)
                     else:
-                        base = page.to_image(resolution=150).original.convert("RGB")
+                        base = page.to_image(resolution=150).original
+                        base = sanitize_image(base)
+                    
                     final_draw = ImageDraw.Draw(base)
                     
                     if 'orig_x0' in w:
@@ -415,7 +445,8 @@ if uploaded_file:
                         if i in st.session_state.pages_data:
                             img_list.append(st.session_state.pages_data[i])
                         else:
-                            p = pdf.pages[i].to_image(resolution=150).original.convert("RGB")
+                            p = pdf.pages[i].to_image(resolution=150).original
+                            p = sanitize_image(p) # 確保匯出時也是正常顏色
                             b = io.BytesIO()
                             p.save(b, format="PNG")
                             img_list.append(b.getvalue())
