@@ -115,7 +115,10 @@ def sanitize_image(pil_image):
     pil_image.save(b, format="PNG")
     b.seek(0)
     
-    return Image.open(b)
+    # [修正 2] 強制載入記憶體，斷開與 BytesIO 的連結
+    new_img = Image.open(b)
+    new_img.load() 
+    return new_img
 
 # --- 歷史紀錄 ---
 def save_history(page_idx, current_img_bytes):
@@ -148,6 +151,9 @@ st.title("🤖 NotebookLM AI 旗艦版 (雲端顯影修復)")
 uploaded_file = st.file_uploader("請上傳 PDF", type="pdf")
 
 if uploaded_file:
+    # [修正 1] 重置檔案指標，確保 Rerun 後能讀到檔案
+    uploaded_file.seek(0)
+    
     with pdfplumber.open(uploaded_file) as pdf:
         total_pages = len(pdf.pages)
         col_nav, col_canvas, col_edit = st.columns([1.2, 3.5, 1.5])
